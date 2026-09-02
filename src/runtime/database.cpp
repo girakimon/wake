@@ -918,6 +918,8 @@ void Database::prepare(const std::string &cmdline) {
   end_txn();
 }
 
+long Database::run_id() const { return imp->run_id; }
+
 void Database::finish_run() {
   auto ts = gettime_ns();
 
