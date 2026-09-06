@@ -21,7 +21,7 @@ pub struct TunnelVisionConfig {
     pub sources: Vec<SourceConfig>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct SourceConfig {
     pub id: String,
     #[serde(default)]
@@ -38,7 +38,7 @@ pub struct SourceConfig {
     pub transport: TransportConfig,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "transport", rename_all = "snake_case")]
 pub enum TransportConfig {
     Local,
@@ -425,6 +425,14 @@ impl TunnelVision {
         if let Some(path) = path {
             return Self::load(path);
         }
+        #[cfg(feature = "tui")]
+        if let Ok(discovery) = std::env::var("WAKE_TUNNEL_DISCOVERY") {
+            if discovery != "langfuse" {
+                return Err(anyhow!("WAKE_TUNNEL_DISCOVERY must be langfuse"));
+            }
+            let config = crate::tunnel_discovery::discover_langfuse()?;
+            return Self::from_config(config, Path::new("."));
+        }
         let mut directory = std::env::current_dir().context("finding current directory")?;
         loop {
             let candidate = directory.join(".wake/tunnel-vision.json");
@@ -446,6 +454,10 @@ impl TunnelVision {
             .with_context(|| format!("reading Tunnel Vision config {}", path.display()))?;
         let config: TunnelVisionConfig = serde_json::from_str(&text)
             .with_context(|| format!("parsing Tunnel Vision config {}", path.display()))?;
+        Self::from_config(config, path.parent().unwrap_or_else(|| Path::new(".")))
+    }
+
+    fn from_config(config: TunnelVisionConfig, base: &Path) -> Result<Self> {
         if config.version != CONFIG_VERSION {
             return Err(anyhow!(
                 "unsupported Tunnel Vision config version {} (expected {CONFIG_VERSION})",
@@ -462,7 +474,6 @@ impl TunnelVision {
                 "Tunnel Vision config must contain at least one source"
             ));
         }
-        let base = path.parent().unwrap_or_else(|| Path::new("."));
         let mut identities = HashSet::new();
         let mut sources = Vec::with_capacity(config.sources.len());
         for source in config.sources {

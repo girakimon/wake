@@ -43,9 +43,15 @@ also copied onto each `wake.run` span:
 - `WAKE_TUNNEL_SOURCE_ID` as `wake.source.id`
 - `WAKE_RUNNER_KIND` as `wake.runner.kind`
 - `WAKE_RUNNER_HOST` as `wake.runner.host`
+- `WAKE_TUNNEL_MCP_HOST` as `wake.mcp.host`
+- `WAKE_TUNNEL_DATABASE` as `wake.mcp.database`
+- `WAKE_TUNNEL_ARTIFACT_ROOT` as `wake.mcp.artifact_root`
 - `<source>:<run_id>` as `wake.run.coordinate` when a source ID is present
 
-Use the same triage and source IDs in `.wake/tunnel-vision.json`. The W3C trace
+Tunnel Vision can discover source mappings from these attributes through the
+Langfuse observations API, or use the same triage and source IDs in
+`.wake/tunnel-vision.json`. See [Langfuse discovery](tunnel-vision.md#discover-sources-from-langfuse)
+for worker and coordinator configuration. The W3C trace
 context provides causal linkage, while the explicit triage ID remains a stable
 search key if a collector samples or stores trace segments independently.
 
@@ -78,7 +84,9 @@ because they have no execution interval in the current run. Failed jobs and
 failed runs set the OpenTelemetry span status to error.
 
 Wake deliberately omits command lines, environment variables, standard output,
-standard error, artifact paths, and file contents from telemetry.
+standard error, individual artifact paths, and file contents from telemetry.
+The database and artifact-root locations are exported only when explicitly set
+through the optional Tunnel Vision variables above.
 
 See [Tunnel Vision](tunnel-vision.md) for the federated TUI and its separate,
 on-demand read-only artifact data plane.

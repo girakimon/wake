@@ -12,10 +12,82 @@ Slurm, Ray, or other remote runners. It keeps two concerns separate:
   to the coordinator.
 
 This separation is intentional: telemetry stays small and does not contain
-commands, logs, paths, or file content, while detailed data remains on the host
-that owns it.
+commands, logs, or file content, while detailed data remains on the host
+that owns it. Endpoint discovery can optionally publish the database and
+artifact-root locations as span attributes.
 
-## Configure the virtual workspace
+## Discover sources from Langfuse
+
+When Langfuse stores your traces in its internal ClickHouse database, Tunnel
+Vision reads the public Langfuse observations API. It does not query private
+ClickHouse tables or require a local source-mapping file.
+
+On each worker, publish its source identity and connection locations alongside
+the shared parent trace context described below:
+
+```sh
+export WAKE_TUNNEL_TRIAGE_ID=change-1842-attempt-3
+export WAKE_TUNNEL_SOURCE_ID=slurm-gpu-a
+export WAKE_RUNNER_KIND=slurm
+export WAKE_RUNNER_HOST=gpu-a.internal
+export WAKE_TUNNEL_MCP_HOST=user@gpu-a.internal
+export WAKE_TUNNEL_DATABASE=/scratch/run-1842/wake.db
+export WAKE_TUNNEL_ARTIFACT_ROOT=/scratch/run-1842
+wake --otel build
+```
+
+`WAKE_TUNNEL_MCP_HOST` is an SSH destination or an alias from the coordinator's
+SSH config. If omitted, discovery uses `wake.runner.host`. Database and
+artifact-root paths must be absolute paths on that destination. `wake-mcp`
+must be available on its PATH. SSH authentication, ports, jump hosts, and other
+connection policy stay in the coordinator's SSH config. Discovery uses batch
+mode and a five-second SSH connection timeout. Telemetry cannot supply shell
+commands, executable names, or SSH options.
+
+On the coordinator, set the Langfuse base URL and project API keys, then select
+the shared OTel trace ID and an ISO 8601 time range covering the **start** of
+its Wake runs:
+
+```sh
+export LANGFUSE_BASE_URL=https://langfuse.example.com
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+export WAKE_TUNNEL_DISCOVERY=langfuse
+export WAKE_TUNNEL_TRACE_ID=4bf92f3577b34da6a3ce929d0e0e4736
+export WAKE_TUNNEL_FROM_TIME=2026-09-06T00:00:00Z
+export WAKE_TUNNEL_TO_TIME=2026-09-07T00:00:00Z
+wake tunnel-vision
+```
+
+The default uses the v2 observations API (Langfuse Cloud or self-hosted v4).
+For self-hosted Langfuse v3, also set `WAKE_TUNNEL_LANGFUSE_API_VERSION=1`.
+The base URL is the Langfuse application URL, without `/api/public/otel`.
+These query credentials are independent of the worker's OTLP export headers.
+For direct export to Langfuse v4, include `x-langfuse-ingestion-version=4` in
+`OTEL_EXPORTER_OTLP_HEADERS` (or the signal-specific headers) alongside the
+Langfuse Basic authorization header to avoid legacy ingestion delays. See
+[Langfuse OTLP configuration](https://langfuse.com/integrations/native/opentelemetry).
+
+Discovery reads `wake.run` observation metadata, including Langfuse's
+`metadata.attributes` representation of ordinary OTel attributes. It follows
+pagination and deduplicates identical source mappings. Conflicting mappings
+for one source ID are errors: source IDs must identify a stable worker and
+workspace within a triage. If a trace contains several triages, select one
+with `WAKE_TUNNEL_TRIAGE_ID`. Missing endpoint attributes produce an error;
+older traces containing only a host cannot locate a specific `wake.db`.
+
+Discovery happens when the TUI opens. Wake exports only after a run completes,
+and Langfuse ingestion can lag; reopen the view after additional runs arrive.
+Live worker registration is not implemented. Queries have a 20-second timeout
+per page and are bounded to 100 pages of 100 observations, with an 8 MiB limit
+per response. Exceeding a limit fails instead of silently using partial results.
+
+An explicit `wake-tui --tunnel-config ...` takes precedence over discovery.
+Without `WAKE_TUNNEL_DISCOVERY`, the local configuration flow below still applies.
+See the [Langfuse observations API](https://langfuse.com/docs/api-and-data-platform/features/observations-api)
+for API versions, time filters, and pagination.
+
+## Configure the virtual workspace with a file
 
 Create `.wake/tunnel-vision.json`. Paths on local sources are resolved relative
 to the directory containing the config. Paths on remote sources are passed to
@@ -109,19 +181,22 @@ The exported run attributes are:
 
 | Attribute | Meaning |
 | --- | --- |
-| `wake.triage.id` | Stable triage/search identity; matches the config |
+| `wake.triage.id` | Stable triage/search identity |
 | `wake.source.id` | Globally unique source within the triage |
 | `wake.run.id` | Database-local run ID |
 | `wake.run.coordinate` | Source-qualified run identity, such as `slurm-gpu-a:7` |
 | `wake.runner.kind` | `local`, `slurm`, `ray`, or a site-defined runner |
 | `wake.runner.host` | Execution host or stable worker identity |
+| `wake.mcp.host` | Optional SSH destination (`WAKE_TUNNEL_MCP_HOST`) |
+| `wake.mcp.database` | Remote database path (`WAKE_TUNNEL_DATABASE`) |
+| `wake.mcp.artifact_root` | Remote artifact root (`WAKE_TUNNEL_ARTIFACT_ROOT`) |
 
 Job IDs are also database-local. The TUI therefore renders `source#job`, never
 a bare remote job ID.
 
 ## Triage and parallel presentation
 
-The dashboard shows one execution lane per configured source, including its
+The dashboard shows one execution lane per source, including its
 runner, host, run count, running count, and failures. A source that is
 temporarily unavailable reports its error without removing jobs returned by
 healthy sources. The triage queue mixes active jobs and failures across lanes,
@@ -168,8 +243,8 @@ the stdio protocol itself does not add credentials.
 The first end-to-end slice includes OTEL correlation attributes, W3C sibling
 run semantics, config-driven local/remote federation, source-qualified
 identity, parallel source lanes, resilient remote sessions, and confined
-artifact previews. Natural follow-on work is collector-backed source discovery
-(so config can be generated from trace attributes), binary-safe ranged export,
-and scheduler adapters that publish worker endpoints automatically. Those can
+artifact previews. Langfuse-backed source discovery can replace the local
+mapping file. Natural follow-on work is live worker registration, binary-safe
+ranged export, and scheduler adapters that publish worker endpoints automatically. Those can
 extend the same trace/data-plane contracts without changing the virtual URI or
 TUI identity model.

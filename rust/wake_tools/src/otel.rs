@@ -124,6 +124,9 @@ fn tunnel_attributes_from(run_id: i64, value: impl Fn(&str) -> Option<String>) -
         ("WAKE_TUNNEL_SOURCE_ID", "wake.source.id"),
         ("WAKE_RUNNER_KIND", "wake.runner.kind"),
         ("WAKE_RUNNER_HOST", "wake.runner.host"),
+        ("WAKE_TUNNEL_MCP_HOST", "wake.mcp.host"),
+        ("WAKE_TUNNEL_DATABASE", "wake.mcp.database"),
+        ("WAKE_TUNNEL_ARTIFACT_ROOT", "wake.mcp.artifact_root"),
     ];
     let mut attributes = mappings
         .into_iter()
@@ -272,6 +275,9 @@ mod tests {
             "WAKE_TUNNEL_SOURCE_ID" => Some("slurm-a".to_owned()),
             "WAKE_RUNNER_KIND" => Some("slurm".to_owned()),
             "WAKE_RUNNER_HOST" => Some("gpu-a".to_owned()),
+            "WAKE_TUNNEL_MCP_HOST" => Some("user@gpu-a".to_owned()),
+            "WAKE_TUNNEL_DATABASE" => Some("/work/wake.db".to_owned()),
+            "WAKE_TUNNEL_ARTIFACT_ROOT" => Some("/work".to_owned()),
             _ => None,
         });
         let pairs = attributes
@@ -281,5 +287,14 @@ mod tests {
         assert!(pairs.contains(&("wake.triage.id", "triage-4".to_owned())));
         assert!(pairs.contains(&("wake.source.id", "slurm-a".to_owned())));
         assert!(pairs.contains(&("wake.run.coordinate", "slurm-a:17".to_owned())));
+        assert!(pairs.contains(&("wake.mcp.host", "user@gpu-a".to_owned())));
+        assert!(pairs.contains(&("wake.mcp.database", "/work/wake.db".to_owned())));
+        assert!(pairs.contains(&("wake.mcp.artifact_root", "/work".to_owned())));
+    }
+
+    #[test]
+    fn omits_unconfigured_tunnel_locations() {
+        assert!(tunnel_attributes_from(17, |_| None).is_empty());
+        assert!(tunnel_attributes_from(17, |_| Some(String::new())).is_empty());
     }
 }
